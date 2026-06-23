@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.23;
+
+contract Garage {
+    // Definicja struktury samochodu
+    // Zoptymalizowana kolejność typów danych pozwala EVM na lepsze pakowanie slotów storage
+    struct Car {
+        string make;
+        string model;
+        string color;
+        uint256 numberOfDoors;
+    }
+
+    // Custom Errors - oszczędność gazu przy revertach
+    error IndexOutOfBounds();
+    error GarageIsEmpty();
+
+    // Mapowanie użytkownika na tablicę jego samochodów
+    mapping(address => Car[]) private userGarages;
+
+    // Zdarzenia (Events) dla pełnej transparentności i integracji z frontendem
+    event CarAdded(address indexed user, uint256 indexed index, string make, string model);
+    event CarUpdated(address indexed user, uint256 indexed index, string make, string model);
+    event GarageReset(address indexed user);
+
+    /**
+     * @notice Dodaje nowy samochód do garażu użytkownika.
+     * @dev Użycie `calldata` zapobiega kosztownemu kopiowaniu danych wejściowych do pamięci RAM (memory).
+     */
+    function addCar(
+        string calldata _make,
+        string calldata _model,
+        string calldata _color,
+        uint256 _numberOfDoors
+    ) external {
+        // Bezpośrednie dodanie do tablicy w storage (ogranicza operacje kopiowania)
+        userGarages[msg.sender].push(Car({
+            make: _make,
+            model: _model,
+            color: _color,
+            numberOfDoors: _numberOfDoors
+        }));
+
+        // Zwracamy indeks nowo dodanego auta (długość tablicy - 1)
+        uint256 newIndex = userGarages[msg.sender].length - 1;
+
+        emit CarAdded(msg.sender, newIndex, _make, _model);
+    }
+
+    /**
+     * @notice Aktualizuje dane istniejącego samochodu na podstawie jego indeksu.
+     * @dev Wykorzystujemy referencję `storage` do bezpośredniej modyfikacji danych w bazie, zamiast nadpisywać całą strukturę.
+     */
+    function updateCar(
+        uint256 _index,
+        string calldata _make,
+        string calldata _model,
+        string calldata _color,
+        uint256 _numberOfDoors
+    ) external {
+        // Tani warunek sprawdzający zakres indeksu (zamiast require)
+        if (_index >= userGarages[msg.sender].length) {
+            revert IndexOutOfBounds();
+        }
+
+        // Pobranie referencji typu 'storage' - modyfikujemy bezpośrednio wskaźnik zapisu, oszczędzając gaz
+        Car storage carToUpdate = userGarages[msg.sender][_index];
+        
+        carToUpdate.make = _make;
+        carToUpdate.model = _model;
+        carToUpdate.color = _color;
+        carToUpdate.numberOfDoors = _numberOfDoors;
+
+        emit CarUpdated(msg.sender, _index, _make, _model);
+    }
+
+    /**
+     * @notice Zwraca listę samochodów wybranego użytkownika.
+     * @dev Funkcja zewnętrzna (external view) wywoływana poza blockchainem (np. RPC) nie zużywa gazu.
+     */
+    function getUserCars(address _user) external view returns (Car[] memory) {
+        return userGarages[_user];
+    }
+
+    /**
+     * @notice Zwraca listę samochodów nadawcy transakcji.
+     */
+    function getMyCars() external view returns (Car[] memory) {
+        return userGarages[msg.sender];
+    }
+
+    /**
+     * @notice Całkowicie czyści garaż użytkownika, zwalniając miejsce w storage.
+     * @dev Usunięcie danych ze storage nagradza użytkownika zwrotem gazu (Gas Refund).
+     */
+    function resetMyGarage() external {
+        if (userGarages[msg.sender].length == 0) {
+            revert GarageIsEmpty();
+        }
+
+        // Słowo kluczowe delete automatycznie zeruje całą dynamiczną tablicę i struktury w niej zawarte
+        delete userGarages[msg.sender];
+
+        emit GarageReset(msg.sender);
+    }
+}
